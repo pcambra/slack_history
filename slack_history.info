@@ -1,0 +1,9 @@
+name = Slack history
+description = Displays a slack channel history
+core = 7.x
+configure = admin/config/services/slack-history
+
+; Including these files globally. An autoloader/load of demand strategy would be
+; a better option eventually.
+files[] = includes/SlackHistoryInterface.php
+files[] = includes/SlackHistory.php

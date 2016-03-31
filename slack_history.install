@@ -1,0 +1,17 @@
+<?php
+
+/**
+ * @file
+ */
+
+/**
+ * Implements hook_uninstall().
+ *
+ * We need to get rid of the variables created / configured.
+ */
+function slack_history_uninstall() {
+  variable_del('slack_history_endpoint');
+  variable_del('slack_history_token');
+  variable_del('slack_history_channel');
+  variable_del('slack_history_messages_count');
+}

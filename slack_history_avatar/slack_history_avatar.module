@@ -1,0 +1,26 @@
+<?php
+
+/**
+ * @file
+ *
+ * Module file for slack history avatar.
+ */
+
+/**
+ * Implements hook_slack_history_member_properties().
+ */
+function slack_history_avatar_slack_history_display_alter(&$messages, $members) {
+  foreach ($messages['messages'] as &$message) {
+    $member = SlackHistory::getMemberByProperty($members, 'id', $message['user']);
+    $message['user_avatar'] = $member['profile']['image_24'];
+  }
+}
+
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function slack_history_avatar_theme_registry_alter(&$theme_registry) {
+  $path = drupal_get_path('module', 'slack_history_avatar');
+  $theme_registry['slack_history_display_message']['path'] = $path . '/templates';
+  $theme_registry['slack_history_display_message']['template'] = 'slack-history-display-message-avatar';
+}

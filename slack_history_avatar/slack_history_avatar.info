@@ -1,0 +1,5 @@
+name = Slack history avatar
+description = Adds the user avatar to the chat listing
+core = 7.x
+
+dependencies[] = slack_history

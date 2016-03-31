@@ -1,0 +1,218 @@
+<?php
+/**
+ * @file
+ * Slack history module file.
+ */
+
+/**
+ * Implements hook_menu().
+ *
+ * Defines the menu routes for the admin settings form and the list of messages,
+ * these routes are protected by permissions.
+ */
+function slack_history_menu() {
+  $items = array();
+
+  $items['admin/config/services/slack-history'] = array(
+    'title' => 'Slack history configuration',
+    'description' => 'Config parameters for displaying slack messages in a page',
+    'access callback' => 'user_access',
+    'access arguments' => array('slack_history_administer'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('slack_history_settings'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'slack_history.admin.inc',
+  );
+
+  $items['slack-history'] = array(
+    'title' => 'Slack messages',
+    'description' => 'Display the last slack messages',
+    'access callback' => 'user_access',
+    'access arguments' => array('slack_history_access'),
+    'page callback' => 'slack_history_display_messages',
+    'type' => MENU_CALLBACK,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_permission().
+ */
+function slack_history_permission() {
+  $return = array();
+
+  $return['slack_history_administer'] = array(
+    'title' => t('Administer slack history'),
+    'description' => t('Configure the admin parameters for the slack history
+      module'),
+  );
+
+  $return['slack_history_access'] = array(
+    'title' => t('Access slack history'),
+    'description' => t('Access the slack history page'),
+  );
+
+  return $return;
+}
+
+/**
+ * Renders the lates messages from Slack.
+ */
+function slack_history_display_messages() {
+  $endpoint = variable_get('slack_history_endpoint', '');
+  $token = variable_get('slack_history_token', '');
+
+  // Deny access if any of the required configuration is not correct.
+  if (empty($endpoint) || empty ($token)) {
+    drupal_access_denied();
+  }
+
+  // Get the customizations for the slack API query.
+  $channel = variable_get('slack_history_channel', '');
+  $message_count = variable_get('slack_history_messages_count', 10);
+
+  // Make the page title a bit more contextual.
+  if (!empty($channel)) {
+    drupal_set_title(t('Latest messages in #@channel', array('@channel' => $channel)));
+  }
+
+  // Instantiate the slack object.
+  $slack_history = new SlackHistory($endpoint, $token);
+
+  // Get the messages from the Slack API.
+  $messages = slack_history_get_messages($slack_history, $channel, $message_count);
+  // Break early in case of error.
+  if (empty($messages)) {
+    return t('No messages found');
+  }
+  // Get the members (users) from the Slack API.
+  $members = slack_history_get_members($slack_history);
+  // Break early in case of error.
+  if (empty($members)) {
+    return t('No messages found');
+  }
+
+  // Allow other modules to alter the messages.
+  drupal_alter('slack_history_display', $messages, $members);
+
+  // Build the render array.
+  $history = array(
+    '#theme' => 'slack_history_display_wrapper',
+    '#attributes' => array('class' => 'slack-history-list'),
+    '#messages' => array(),
+    '#cache' => array(
+      'cid' => 'slack_history_data',
+      'keys' => array('slack_history_display'),
+      'bin' => 'cache',
+      'expire' => CACHE_TEMPORARY,
+      'granularity' => DRUPAL_CACHE_PER_PAGE,
+    ),
+  );
+
+  // Add additional properties.
+  foreach ($messages['messages'] as $message) {
+    $member = $slack_history->getMemberByProperty($members, 'id', $message['user']);
+    if (!empty($member)) {
+      $message['user_name'] = $member['name'];
+    }
+    $history['#messages'][] = array(
+      '#theme' => 'slack_history_display_message',
+      '#message' => $message,
+    );
+  }
+
+  return drupal_render($history);
+}
+
+/**
+ * Wrapper function to get the messages from Slack to allow error reporting.
+ *
+ * @param \SlackHistory $slack_history
+ * @param string $channel_name
+ *  Channel name.
+ * @param $message_count
+ *  Number of messages to retieve.
+ * @return array Response from slack, empty if there's an error.
+ * Response from slack, empty if there's an error.
+ */
+function slack_history_get_messages(SlackHistory $slack_history, $channel_name, $message_count) {
+  $response = &drupal_static(__FUNCTION__);
+
+  if (!isset($response)) {
+    $response = $slack_history->getMessages($channel_name, $message_count);
+    // Register if something has gone wrong.
+    if ($response['ok'] <> TRUE) {
+      watchdog('slack_history', 'The response from Slack was: @response', array('@response' => print_r($response, 1)), WATCHDOG_WARNING);
+      drupal_set_message(t('There was an error retrieving the messages from Slack'), 'error');
+      return array();
+    }
+  }
+
+  return $response;
+}
+
+/**
+ * Wrapper function to get the members from Slack to allow error reporting.
+ *
+ * @param \SlackHistory $slack_history
+ *  Slack history object.
+ *
+ * @return array
+ *  Response from slack, empty if there's an error.
+ */
+function slack_history_get_members(SlackHistory $slack_history) {
+  $response = &drupal_static(__FUNCTION__);
+
+  if (!isset($response)) {
+    $response = $slack_history->getMembers();
+    // Register if something has gone wrong.
+    if ($response['ok'] <> TRUE) {
+      watchdog('slack_history', 'The response from Slack was: @response', array('@response' => print_r($response, 1)), WATCHDOG_WARNING);
+      drupal_set_message(t('There was an error retrieving the members from Slack'), 'error');
+      return array();
+    }
+  }
+
+  return $response;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function slack_history_theme() {
+  $path = drupal_get_path('module', 'slack_history') . '/templates';
+  return array(
+    'slack_history_display_wrapper' => array(
+      'variables' => array('messages' => array()),
+    ),
+    'slack_history_display_message' => array(
+      'variables' => array('message' => array()),
+      'template' => 'slack-history-display-message',
+      'path' => $path,
+    ),
+  );
+}
+
+/**
+ * Custom list implementation for messages to allow render.
+ *
+ * @see theme_item_list()
+ */
+function theme_slack_history_display_wrapper($variables) {
+  $messages = $variables['messages'];
+  $items = array();
+  if (!empty($messages)) {
+    foreach ($messages as $message) {
+      $items[] = render($message);
+    }
+  }
+
+  $variables = array(
+    'items' => $items,
+    'type' => 'ul',
+    'attributes' => array('class' => 'slack-history-list'),
+  );
+  $output = theme('item_list', $variables);
+  return $output;
+}
